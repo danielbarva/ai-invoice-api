@@ -4,21 +4,30 @@ from datetime import datetime
 
 app = Flask(__name__)
 
-OLLAMA_URL = "http://host.docker.internal:11434/api/generate"
+import os
 
-def ask_ollama(prompt):
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+OPENAI_BASE_URL = os.getenv("OPENAI_BASE_URL")
+
+def ask_ai(prompt):
     response = requests.post(
-        OLLAMA_URL,
+        f"{OPENAI_BASE_URL}/chat/completions",
+        headers={
+            "Authorization": f"Bearer {OPENAI_API_KEY}",
+            "Content-Type": "application/json"
+        },
         json={
-            "model": "llama3.2:3b",
-            "prompt": prompt,
-            "stream": False
+            "model": "gemma3:27b",
+            "messages": [
+                {"role": "user", "content": prompt}
+            ]
         },
         timeout=120
     )
+
     response.raise_for_status()
     data = response.json()
-    return data.get("response", "").strip()
+    return data["choices"][0]["message"]["content"].strip()
 
 @app.route("/ping", methods=["GET"])
 def ping():
@@ -44,7 +53,7 @@ def ai():
 
     prompt = f"Odpovez jednou kratkou vetou:\n{text}"
 
-    result = ask_ollama(prompt)
+    result = ask_ai(prompt)
     return jsonify({"response": result}), 200
 
 @app.route("/invoice", methods=["POST"])
@@ -78,7 +87,7 @@ celkova cena v Kc (soucet vsech polozek)
 """
 
     try:
-        result = ask_ollama(prompt)
+        result = ask_ai(prompt)
         return jsonify({
             "invoice" :result
         }), 200
