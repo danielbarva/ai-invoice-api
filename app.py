@@ -2,11 +2,77 @@ from flask import Flask, request, jsonify
 import requests
 from datetime import datetime
 import os
+import time
+from sqlalchemy import create_engine, text
 
 app = Flask(__name__)
 
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-OPENAI_BASE_URL = os.getenv("OPENAI_BASE_URL")
+OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
+OPENAI_BASE_URL = os.environ.get("OPENAI_BASE_URL")
+DATABASE_URL = os.environ.get("DATABASE_URL", "sqlite:///local.db")
+
+engine = create_engine(DATABASE_URL)
+
+
+def wait_for_db():
+    for _ in range(10):
+        try:
+            with engine.connect() as conn:
+                conn.execute(text("SELECT 1"))
+            return
+        except Exception:
+            time.sleep(2)
+    raise Exception("Nepodarilo se pripojit k databazi.")
+
+
+def init_db():
+    with engine.connect() as conn:
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS history (
+                id SERIAL PRIMARY KEY,
+                type VARCHAR(50) NOT NULL,
+                input_text TEXT NOT NULL,
+                output_text TEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """))
+        conn.commit()
+
+
+def save_history(request_type, input_text, output_text):
+    with engine.connect() as conn:
+        conn.execute(
+            text("""
+                INSERT INTO history (type, input_text, output_text)
+                VALUES (:type, :input_text, :output_text)
+            """),
+            {
+                "type": request_type,
+                "input_text": input_text,
+                "output_text": output_text
+            }
+        )
+        conn.commit()
+
+
+def load_history():
+    with engine.connect() as conn:
+        result = conn.execute(text("""
+            SELECT id, type, input_text, output_text, created_at
+            FROM history
+            ORDER BY created_at DESC
+            LIMIT 20
+        """))
+        rows = []
+        for row in result:
+            rows.append({
+                "id": row[0],
+                "type": row[1],
+                "input_text": row[2],
+                "output_text": row[3],
+                "created_at": str(row[4])
+            })
+        return rows
 
 
 def ask_ai(prompt):
@@ -24,7 +90,6 @@ def ask_ai(prompt):
         },
         timeout=120
     )
-
     response.raise_for_status()
     data = response.json()
     return data["choices"][0]["message"]["content"].strip()
@@ -40,16 +105,14 @@ def home():
         <style>
           body {
             font-family: Arial, sans-serif;
-            max-width: 900px;
+            max-width: 1000px;
             margin: 40px auto;
             line-height: 1.6;
             padding: 0 16px;
             background: #f8f9fb;
             color: #222;
           }
-          h1 {
-            margin-bottom: 10px;
-          }
+          h1 { margin-bottom: 10px; }
           .box {
             background: white;
             border: 1px solid #ddd;
@@ -80,9 +143,7 @@ def home():
             border: none;
             cursor: pointer;
           }
-          button:hover {
-            background: #1d4ed8;
-          }
+          button:hover { background: #1d4ed8; }
           .row {
             display: flex;
             gap: 12px;
@@ -99,20 +160,29 @@ def home():
             border-radius: 10px;
             min-height: 80px;
           }
-          .small {
-            color: #666;
-            font-size: 14px;
-          }
+          .small { color: #666; font-size: 14px; }
           code {
             background: #eef2ff;
             padding: 3px 7px;
             border-radius: 6px;
           }
+          table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 12px;
+          }
+          th, td {
+            border: 1px solid #ddd;
+            padding: 8px;
+            text-align: left;
+            vertical-align: top;
+          }
+          th { background: #f3f4f6; }
         </style>
       </head>
       <body>
         <h1>AI Invoice & Text Processing API</h1>
-        <p>Aplikace běží úspěšně. Zadej text nebo otázku, vyber režim a odešli požadavek.</p>
+        <p>Aplikace zpracovává text pomocí AI a ukládá historii do PostgreSQL databáze.</p>
 
         <div class="box">
           <label for="text"><strong>Vstupní text / otázka:</strong></label>
@@ -127,10 +197,11 @@ def home():
             </select>
 
             <button onclick="sendRequest()">Odeslat</button>
+            <button onclick="loadHistory()">Načíst historii</button>
           </div>
 
           <p class="small">
-            Režimy používají endpointy <code>/ai</code>, <code>/invoice</code> a <code>/chat</code>.
+            Režimy používají endpointy <code>/ai</code>, <code>/invoice</code>, <code>/chat</code> a historie se ukládá do databáze.
           </p>
         </div>
 
@@ -140,14 +211,8 @@ def home():
         </div>
 
         <div class="box">
-          <h3>Dostupné endpointy:</h3>
-          <ul>
-            <li><code>/ping</code></li>
-            <li><code>/status</code></li>
-            <li><code>/ai</code></li>
-            <li><code>/invoice</code></li>
-            <li><code>/chat</code></li>
-          </ul>
+          <h3>Historie z databáze:</h3>
+          <div id="history">Zatím nenačteno.</div>
         </div>
 
         <script>
@@ -166,9 +231,7 @@ def home():
             try {
               const response = await fetch("/" + mode, {
                 method: "POST",
-                headers: {
-                  "Content-Type": "application/json"
-                },
+                headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ text: text })
               });
 
@@ -185,11 +248,44 @@ def home():
                 output.textContent = data.invoice || "Žádná odpověď.";
               } else if (mode === "chat") {
                 output.textContent = data.answer || "Žádná odpověď.";
-              } else {
-                output.textContent = JSON.stringify(data, null, 2);
               }
             } catch (error) {
               output.textContent = "Chyba při komunikaci se serverem: " + error;
+            }
+          }
+
+          async function loadHistory() {
+            const historyDiv = document.getElementById("history");
+            historyDiv.innerHTML = "Načítám historii...";
+
+            try {
+              const response = await fetch("/history");
+              const data = await response.json();
+
+              if (!response.ok) {
+                historyDiv.textContent = JSON.stringify(data, null, 2);
+                return;
+              }
+
+              if (!data.length) {
+                historyDiv.textContent = "V databázi zatím nejsou žádná data.";
+                return;
+              }
+
+              let html = "<table><tr><th>ID</th><th>Typ</th><th>Vstup</th><th>Výstup</th><th>Čas</th></tr>";
+              for (const row of data) {
+                html += `<tr>
+                  <td>${row.id}</td>
+                  <td>${row.type}</td>
+                  <td>${row.input_text}</td>
+                  <td>${row.output_text}</td>
+                  <td>${row.created_at}</td>
+                </tr>`;
+              }
+              html += "</table>";
+              historyDiv.innerHTML = html;
+            } catch (error) {
+              historyDiv.textContent = "Chyba při načítání historie: " + error;
             }
           }
         </script>
@@ -212,15 +308,24 @@ def status():
     }), 200
 
 
+@app.route("/history", methods=["GET"])
+def history():
+    try:
+        return jsonify(load_history()), 200
+    except Exception as e:
+        return jsonify({
+            "error": "Nepodarilo se nacist historii z databaze",
+            "detail": str(e)
+        }), 500
+
+
 @app.route("/ai", methods=["POST"])
 def ai():
     data = request.get_json(silent=True) or {}
     text = data.get("text", "").strip()
 
     if not text:
-        return jsonify({
-            "error": "Chybi pole 'text'"
-        }), 400
+        return jsonify({"error": "Chybi pole 'text'"}), 400
 
     prompt = f"""
 Zkrat nasledujici text na jednu kratkou vetu.
@@ -231,6 +336,7 @@ Text:
 
     try:
         result = ask_ai(prompt)
+        save_history("ai", text, result)
         return jsonify({"response": result}), 200
     except requests.RequestException as e:
         return jsonify({
@@ -271,9 +377,8 @@ celkova cena v Kc
 
     try:
         result = ask_ai(prompt)
-        return jsonify({
-            "invoice": result
-        }), 200
+        save_history("invoice", text, result)
+        return jsonify({"invoice": result}), 200
     except requests.RequestException as e:
         return jsonify({
             "error": "Nepodarilo se spojit s AI API",
@@ -287,9 +392,7 @@ def chat():
     text = data.get("text", "").strip()
 
     if not text:
-        return jsonify({
-            "error": "Chybi pole 'text'"
-        }), 400
+        return jsonify({"error": "Chybi pole 'text'"}), 400
 
     prompt = f"""
 Odpovez cesky jasne a vecne na nasledujici otazku nebo zadani.
@@ -299,9 +402,8 @@ Odpovez cesky jasne a vecne na nasledujici otazku nebo zadani.
 
     try:
         result = ask_ai(prompt)
-        return jsonify({
-            "answer": result
-        }), 200
+        save_history("chat", text, result)
+        return jsonify({"answer": result}), 200
     except requests.RequestException as e:
         return jsonify({
             "error": "Nepodarilo se spojit s AI API",
@@ -309,6 +411,8 @@ Odpovez cesky jasne a vecne na nasledujici otazku nebo zadani.
         }), 500
 
 
+wait_for_db()
+init_db()
+
 if __name__ == "__main__":
-    port = int(os.getenv("PORT", 8081))
-    app.run(host="0.0.0.0", port=port)
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
