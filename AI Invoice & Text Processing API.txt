@@ -1,0 +1,160 @@
+AI Invoice & Text Processing API
+
+Popis projektu
+
+Tento projekt je webová aplikace vytvořená v jazyce Python pomocí frameworku Flask.
+Aplikace slouží ke zpracování textu pomocí AI a ukládání historie požadavků do databáze PostgreSQL.
+
+Projekt je spuštěn pomocí Docker Compose, kde běží dvě samostatné služby:
+
+app – hlavní Flask aplikace
+db – PostgreSQL databáze
+Hlavní funkce aplikace
+
+1. Shrnutí textu
+
+Endpoint:
+
+POST /ai
+
+Uživatel odešle text a AI ho zkrátí do jedné stručné věty.
+
+2. Generování faktury
+
+Endpoint:
+
+POST /invoice
+
+Z textového zadání aplikace vytvoří jednoduchou fakturu.
+
+Příklad vstupu:
+
+2x monitor 5000 Kč, 1x myš 1000 Kč
+
+3. Chat / odpovědi
+
+Endpoint:
+
+POST /chat
+
+AI odpovídá na libovolné otázky.
+
+4. Historie požadavků
+
+Endpoint:
+
+GET /history
+
+Zobrazuje uloženou historii požadavků a odpovědí z databáze.
+
+Použité technologie
+
+Python
+
+Hlavní programovací jazyk projektu.
+
+Flask
+
+Lehký web framework pro tvorbu API a webových aplikací.
+
+PostgreSQL
+
+Relační databáze pro ukládání historie.
+
+Docker
+
+Kontejnerizace aplikace.
+
+Docker Compose
+
+Spouštění více služeb najednou.
+
+SQLAlchemy
+
+Knihovna pro práci s databází.
+
+psycopg2
+
+Driver pro připojení Pythonu k PostgreSQL.
+
+Requests
+
+Knihovna pro HTTP komunikaci s AI API.
+
+Struktura projektu
+
+project/
+│── app.py
+│── Dockerfile
+│── compose.yml
+│── requirements.txt
+│── README.md
+
+Dockerfile
+
+Dockerfile slouží k vytvoření Docker image aplikace.
+
+Používá Python image, nainstaluje knihovny a spustí aplikaci.
+
+Compose.yml
+
+Soubor compose.yml spouští dvě služby:
+
+App
+
+vytvoří image z Dockerfile
+spustí Flask aplikaci
+Databáze
+PostgreSQL image
+vytvoří databázi
+uloží data
+Environment Variables
+
+Použité proměnné prostředí:
+
+DATABASE_URL
+OPENAI_API_KEY
+OPENAI_BASE_URL
+PORT
+Význam:
+DATABASE_URL – připojení k databázi
+OPENAI_API_KEY – API klíč
+OPENAI_BASE_URL – URL AI serveru
+PORT – port aplikace
+Jak aplikace funguje
+Uživatel odešle požadavek
+Flask přijme request
+Aplikace zavolá AI API
+Výsledek uloží do databáze
+Vrátí odpověď uživateli
+Instalace a spuštění
+
+1. GitHub repozitář
+
+Nahraj projekt na GitHub.
+
+2. Docker Compose
+
+Spuštění:
+
+docker compose up --build
+Dostupné endpointy
+GET /
+GET /ping
+GET /status
+GET /history
+
+POST /ai
+POST /invoice
+POST /chat
+Co jsem se naučil
+práce s Docker Compose
+propojení aplikace a databáze
+tvorba REST API
+práce s PostgreSQL
+práce s AI API
+práce s environment variables
+Závěr
+
+Projekt propojuje více moderních technologií do jedné funkční aplikace.
+Uživatel může zpracovávat text pomocí AI a data se ukládají do databáze.
